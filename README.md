@@ -85,7 +85,7 @@ For API documentation, see [docs/API.md](docs/API.md).
 
 MIT — see [LICENSE](LICENSE).
 
-Copyright (c) 2026 Walid Ladeb
+Copyright (c) 2026 cyber security community
 
 ---
 

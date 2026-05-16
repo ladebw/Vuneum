@@ -1,0 +1,460 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./vuneum.db"
+}
+
+// ─── USER & AUTH ───────────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String?
+  username      String    @unique
+  passwordHash  String
+  role          UserRole  @default(RESEARCHER)
+  avatarUrl     String?
+  bio           String?
+  website       String?
+  twitterHandle String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  organizationId       String?
+  organization         Organization?          @relation(fields: [organizationId], references: [id])
+  programs             Program[]              @relation("ProgramOwner")
+  reports              Report[]               @relation("ReportReporter")
+  triagedReports       Report[]               @relation("ReportTriager")
+  timelineEvents       ReportTimelineEvent[]
+  comments             ReportComment[]
+  disputes             Dispute[]              @relation("DisputeResearcher")
+  disputeDecisions     Dispute[]              @relation("DisputeDecider")
+  payouts              Payout[]
+  reputation           ReputationProfile?
+  notifications        Notification[]
+  sessions             Session[]
+  accounts             Account[]
+
+  @@index([email])
+  @@index([role])
+}
+
+enum UserRole {
+  RESEARCHER
+  COMPANY
+  TRIAGER
+  ADMIN
+}
+
+// ─── ORGANIZATION ──────────────────────────────────────────
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  logoUrl     String?
+  website     String?
+  verified    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members  User[]
+  programs Program[]
+}
+
+// ─── PROGRAM ───────────────────────────────────────────────
+
+model Program {
+  id               String        @id @default(uuid())
+  title            String
+  slug             String        @unique
+  description      String
+  fullPolicy       String?
+  visibility       Visibility    @default(PRIVATE)
+  status           ProgramStatus @default(DRAFT)
+  minSeverity      Severity      @default(LOW)
+  maxPayout        Float?
+  minPayout        Float?
+  platformFeePct   Float         @default(15.0)
+  disclosurePolicy Disclosure    @default(COORDINATED)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  ownerId        String
+  owner          User           @relation("ProgramOwner", fields: [ownerId], references: [id])
+  organizationId String?
+  organization   Organization?  @relation(fields: [organizationId], references: [id])
+
+  scopeAssets     ScopeAsset[]
+  rewardTiers     RewardTier[]
+  reports         Report[]
+  transparency    TransparencyMetric?
+
+  @@index([status])
+  @@index([visibility])
+}
+
+enum Visibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum ProgramStatus {
+  DRAFT
+  PRIVATE
+  PUBLIC
+  PAUSED
+  CLOSED
+}
+
+enum Severity {
+  NONE
+  INFORMATIONAL
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum Disclosure {
+  NONE
+  COORDINATED
+  FULL
+}
+
+// ─── SCOPE ASSETS ──────────────────────────────────────────
+
+model ScopeAsset {
+  id           String   @id @default(uuid())
+  assetType    AssetType
+  identifier   String   // domain, URL pattern, IP range, mobile app ID, etc.
+  description  String?
+  inScope      Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  programId String
+  program   Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  @@index([programId])
+}
+
+enum AssetType {
+  DOMAIN
+  WILDCARD_DOMAIN
+  IP_RANGE
+  URL_PREFIX
+  MOBILE_APP
+  API_ENDPOINT
+  CLOUD_ASSET
+  OTHER
+}
+
+// ─── REWARD TIERS ──────────────────────────────────────────
+
+model RewardTier {
+  id          String   @id @default(uuid())
+  severity    Severity
+  minAmount   Float
+  maxAmount   Float
+  description String?
+  createdAt   DateTime @default(now())
+
+  programId String
+  program   Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  @@unique([programId, severity])
+}
+
+// ─── REPORT ────────────────────────────────────────────────
+
+model Report {
+  id               String       @id @default(uuid())
+  title            String
+  vulnerabilityType String
+  targetAsset      String
+  claimedSeverity  Severity
+  actualSeverity   Severity?
+  impact           String
+  stepsToReproduce String
+  suggestedFix     String?
+  status           ReportStatus @default(SUBMITTED)
+  disclosurePref   Disclosure   @default(COORDINATED)
+  isPrivate        Boolean      @default(true)
+  internalNotes    String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  reporterId String
+  reporter   User   @relation("ReportReporter", fields: [reporterId], references: [id])
+  triagerId  String?
+  triager    User?  @relation("ReportTriager", fields: [triagerId], references: [id])
+  programId  String
+  program    Program @relation(fields: [programId], references: [id])
+
+  evidence     ReportEvidence[]
+  timeline     ReportTimelineEvent[]
+  comments     ReportComment[]
+  duplicatesOfMe  DuplicateClaim[] @relation("OriginalReport")
+  myDuplicateClaim DuplicateClaim? @relation("DuplicateReport")
+  dispute      Dispute?
+  payout       Payout?
+
+  @@index([status])
+  @@index([reporterId])
+  @@index([programId])
+  @@index([triagerId])
+}
+
+enum ReportStatus {
+  SUBMITTED
+  VIEWED
+  UNDER_REVIEW
+  NEEDS_MORE_INFO
+  VALIDATED
+  DUPLICATE_CLAIMED
+  DISPUTED
+  ACCEPTED
+  REJECTED
+  PAID
+  DISCLOSED
+  CLOSED
+}
+
+// ─── REPORT EVIDENCE ───────────────────────────────────────
+
+model ReportEvidence {
+  id        String   @id @default(uuid())
+  type      EvidenceType
+  url       String
+  title     String?
+  createdAt DateTime @default(now())
+
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+enum EvidenceType {
+  SCREENSHOT
+  LOG_FILE
+  VIDEO
+  POC_CODE
+  NETWORK_CAPTURE
+  OTHER
+}
+
+// ─── REPORT COMMENT ────────────────────────────────────────
+
+model ReportComment {
+  id        String   @id @default(uuid())
+  content   String
+  isPrivate Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
+}
+
+// ─── TIMELINE EVENT (IMMUTABLE) ────────────────────────────
+
+model ReportTimelineEvent {
+  id        String   @id @default(uuid())
+  eventType String
+  oldValue  String?  // JSON string of old state
+  newValue  String?  // JSON string of new state
+  notes     String?
+  createdAt DateTime @default(now())
+
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User   @relation(fields: [userId], references: [id])
+
+  @@index([reportId])
+  @@index([createdAt])
+}
+
+// ─── DUPLICATE CLAIM ───────────────────────────────────────
+
+model DuplicateClaim {
+  id                       String   @id @default(uuid())
+  rootCauseExplanation     String
+  assetComparison          String
+  impactOverlapComparison  String
+  firstSubmissionComparison String
+  triagerReasoning         String
+  createdAt                DateTime @default(now())
+
+  originalReportId String
+  originalReport   Report @relation("OriginalReport", fields: [originalReportId], references: [id])
+  duplicateReportId String  @unique
+  duplicateReport   Report @relation("DuplicateReport", fields: [duplicateReportId], references: [id])
+}
+
+// ─── DISPUTE ───────────────────────────────────────────────
+
+model Dispute {
+  id                String         @id @default(uuid())
+  disputeType       DisputeType
+  researcherArgument String
+  triagerResponse   String?
+  finalDecision     String?
+  decidedById       String?
+  decidedBy         User?          @relation("DisputeDecider", fields: [decidedById], references: [id])
+  isPublic          Boolean        @default(false)
+  status            DisputeStatus  @default(OPEN)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  resolvedAt        DateTime?
+
+  reportId String  @unique
+  report   Report @relation(fields: [reportId], references: [id])
+  researcherId String
+  researcher   User   @relation("DisputeResearcher", fields: [researcherId], references: [id])
+
+  @@index([reportId])
+  @@index([status])
+}
+
+enum DisputeType {
+  DUPLICATE_DECISION
+  SEVERITY_DOWNGRADE
+  INVALID_REJECTION
+  PAYOUT_ISSUE
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  CLOSED
+}
+
+// ─── PAYOUT ────────────────────────────────────────────────
+
+model Payout {
+  id              String       @id @default(uuid())
+  rewardAmount    Float
+  platformFeePct  Float
+  platformFee     Float
+  researcherNet   Float
+  status          PayoutStatus @default(PENDING)
+  paymentDate     DateTime?
+  paymentRef      String?
+  paymentProof    String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  reportId String  @unique
+  report   Report @relation(fields: [reportId], references: [id])
+  userId   String
+  user     User   @relation(fields: [userId], references: [id])
+
+  @@index([status])
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+}
+
+// ─── REPUTATION ────────────────────────────────────────────
+
+model ReputationProfile {
+  id                  String  @id @default(uuid())
+  validReports        Int     @default(0)
+  totalReports        Int     @default(0)
+  pocQualityScore     Float   @default(0)
+  disputeSuccessRate  Float   @default(0)
+  severityAccuracy    Float   @default(0)
+  signalQuality       Float   @default(0)
+  falsePositiveRate   Float   @default(0)
+  overallScore        Float   @default(0)
+  rank                String?
+  updatedAt           DateTime @updatedAt
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+// ─── TRANSPARENCY METRICS ──────────────────────────────────
+
+model TransparencyMetric {
+  id                  String  @id @default(uuid())
+  avgFirstResponseHours Float @default(0)
+  avgTriageHours       Float @default(0)
+  duplicateRate        Float @default(0)
+  rejectionRate        Float @default(0)
+  disputeReopenRate    Float @default(0)
+  avgPayoutHours       Float @default(0)
+  totalPaid            Float @default(0)
+  validReportCount     Int   @default(0)
+  totalReportCount     Int   @default(0)
+  updatedAt            DateTime @updatedAt
+
+  programId String @unique
+  program   Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+}
+
+// ─── NOTIFICATIONS ─────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(uuid())
+  type      String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([userId, read])
+}
+
+// ─── NEXT-AUTH MODELS ──────────────────────────────────────
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
